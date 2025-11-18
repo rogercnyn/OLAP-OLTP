@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import Analytics from './Analytics';
 import './App.css';
 
 // --- CONSTANTS & MOCK DATA ---
@@ -24,6 +25,7 @@ const getDates = () => {
 
 function App() {
   // --- STATE MANAGEMENT ---
+  const [currentView, setCurrentView] = useState('booking'); // 'booking' or 'analytics'
   const [dates] = useState(getDates());
   const [selectedDate, setSelectedDate] = useState(dates[0]);
   const [movies, setMovies] = useState([]);
@@ -141,26 +143,46 @@ function App() {
 
   const totalPrice = selectedShowtime ? selectedSeats.length * parseFloat(selectedShowtime.price) : 0;
 
+  // Show analytics if selected
+  if (currentView === 'analytics') {
+    return (
+      <div className="app-container">
+        <header>
+          <h1>Movie Booking System</h1>
+          <button className="nav-btn" onClick={() => setCurrentView('booking')}>
+            🎬 Back to Booking
+          </button>
+        </header>
+        <Analytics />
+      </div>
+    );
+  }
+
   return (
     <div className="app-container">
       <header>
         <h1>Movie Booking System</h1>
-        <select 
-          className="date-picker" 
-          value={selectedDate} 
-          onChange={(e) => setSelectedDate(e.target.value)}
-        >
-          {dates.map(d => (
-            <option key={d} value={d}>
-              {new Date(d).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
-            </option>
-          ))}
-        </select>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          <select 
+            className="date-picker" 
+            value={selectedDate} 
+            onChange={(e) => setSelectedDate(e.target.value)}
+          >
+            {dates.map(d => (
+              <option key={d} value={d}>
+                {new Date(d).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+              </option>
+            ))}
+          </select>
+          <button className="nav-btn" onClick={() => setCurrentView('analytics')}>
+            📊 Analytics
+          </button>
+        </div>
       </header>
 
       <div className="movies-grid">
         {movies.map(movie => (
-          <div key={movie.movie_id} className="movie-card">
+          <div key={movie.id} className="movie-card">
             <div className="poster-wrapper">
               <img 
                  src={POSTER_MAP[movie.title] || FALLBACK_POSTER} 
@@ -171,7 +193,7 @@ function App() {
             </div>
             <div className="card-details">
               <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
-                <span className="cinema-tag">{movie.cinema_name}</span>
+                <span className="cinema-tag">Cinema</span>
                 <span style={{color: '#2ecc71', fontWeight: 'bold', fontSize: '0.9rem'}}>
                   ₱{movie.price}
                 </span>

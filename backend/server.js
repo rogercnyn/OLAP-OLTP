@@ -69,12 +69,21 @@ app.get('/api/schedule', async (req, res) => {
     const { date } = req.query; 
     try {
         const query = `
-            SELECT m.id, m.title, m.genre, m.rating, m.poster_url
+            SELECT 
+                m.id, 
+                m.title, 
+                m.price,
+                json_agg(
+                    json_build_object(
+                        'id', s.id,
+                        'time', TO_CHAR(s.start_time, 'HH24:MI')
+                    ) ORDER BY s.start_time
+                ) as showtimes
             FROM movies m
-            WHERE EXISTS (
-                SELECT 1 FROM showtimes s 
-                WHERE s.movie_id = m.id AND DATE(s.show_datetime) = $1
-            )
+            JOIN showtimes s ON s.movie_id = m.id
+            WHERE DATE(s.start_time) = $1
+            GROUP BY m.id, m.title, m.price
+            ORDER BY m.title
         `;
         const result = await pool.query(query, [date]);
         res.json(result.rows);
@@ -88,29 +97,24 @@ app.get('/api/schedule', async (req, res) => {
 app.get('/api/showtimes/:id/seats', async (req, res) => {
     const { id } = req.params;
     try {
-        const showtimesQuery = `
+        const query = `
             SELECT 
-                s.id, s.show_datetime, s.price,
-                a.name AS auditorium_name, a.capacity
-            FROM showtimes s
+                s.id,
+                s.row_code,
+                s.number,
+                CASE 
+                    WHEN rh.id IS NOT NULL THEN 'TAKEN'
+                    ELSE 'available'
+                END as status
+            FROM seats s
             JOIN auditoriums a ON s.auditorium_id = a.id
-            WHERE s.movie_id = $1
-            ORDER BY s.show_datetime
+            JOIN showtimes sh ON sh.auditorium_id = a.id
+            LEFT JOIN reservation_holds rh ON rh.seat_id = s.id AND rh.showtime_id = sh.id
+            WHERE sh.id = $1
+            ORDER BY s.row_code, s.number
         `;
-        const showtimesResult = await pool.query(showtimesQuery, [id]);
-
-        for (const showtime of showtimesResult.rows) {
-            const seatsQuery = `
-                SELECT seat_number, status
-                FROM seats
-                WHERE showtime_id = $1
-                ORDER BY seat_number
-            `;
-            const seatsResult = await pool.query(seatsQuery, [showtime.id]);
-            showtime.seats = seatsResult.rows;
-        }
-
-        res.json(showtimesResult.rows);
+        const result = await pool.query(query, [id]);
+        res.json(result.rows);
     } catch (err) {
         console.error('Error fetching seats:', err);
         res.status(500).json({ error: 'Failed to fetch seats' });
@@ -192,6 +196,90 @@ app.post('/api/book', async (req, res) => {
         res.status(500).json({ error: 'Booking failed', details: err.message });
     } finally {
         client.release();
+    }
+});
+
+// Analytics endpoints (OLAP queries)
+app.get('/api/analytics/revenue', async (req, res) => {
+    try {
+        const query = `
+            SELECT 
+                booking_date,
+                SUM(total_revenue) as daily_revenue,
+                COUNT(*) as bookings,
+                SUM(seats_booked) as seats_sold
+            FROM fact_bookings
+            WHERE booking_date >= CURRENT_DATE - INTERVAL '30 days'
+            GROUP BY booking_date
+            ORDER BY booking_date DESC
+        `;
+        const result = await reportsPool.query(query);
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Revenue analytics error:', err);
+        res.status(500).json({ error: 'Failed to fetch revenue data' });
+    }
+});
+
+app.get('/api/analytics/movies', async (req, res) => {
+    try {
+        const query = `
+            SELECT 
+                movie_title,
+                SUM(total_revenue) as total_revenue,
+                SUM(seats_booked) as total_seats,
+                COUNT(DISTINCT booking_date) as days_shown,
+                AVG(total_revenue) as avg_revenue_per_booking
+            FROM fact_bookings
+            GROUP BY movie_title
+            ORDER BY total_revenue DESC
+            LIMIT 10
+        `;
+        const result = await reportsPool.query(query);
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Movie analytics error:', err);
+        res.status(500).json({ error: 'Failed to fetch movie data' });
+    }
+});
+
+app.get('/api/analytics/timeslots', async (req, res) => {
+    try {
+        const query = `
+            SELECT 
+                time_of_day,
+                day_of_week,
+                COUNT(*) as booking_count,
+                SUM(total_revenue) as revenue,
+                AVG(seats_booked) as avg_seats
+            FROM fact_bookings
+            GROUP BY time_of_day, day_of_week
+            ORDER BY booking_count DESC
+        `;
+        const result = await reportsPool.query(query);
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Timeslot analytics error:', err);
+        res.status(500).json({ error: 'Failed to fetch timeslot data' });
+    }
+});
+
+app.get('/api/analytics/summary', async (req, res) => {
+    try {
+        const query = `
+            SELECT 
+                COUNT(DISTINCT customer_id) as total_customers,
+                COUNT(*) as total_bookings,
+                SUM(seats_booked) as total_seats_sold,
+                SUM(total_revenue) as total_revenue,
+                AVG(total_revenue) as avg_booking_value
+            FROM fact_bookings
+        `;
+        const result = await reportsPool.query(query);
+        res.json(result.rows[0]);
+    } catch (err) {
+        console.error('Summary analytics error:', err);
+        res.status(500).json({ error: 'Failed to fetch summary data' });
     }
 });
 

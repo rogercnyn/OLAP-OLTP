@@ -104,6 +104,7 @@ services:
       DB_PORT: 5432
       DB_NAME: movies_oltp
       DB_HOST_REPORTS: postgres-reports
+      DB_PORT_REPORTS: 5432
       DB_NAME_REPORTS: movies_olap
       PORT: 3000
     ports:
