@@ -1,0 +1,42 @@
+# Node modules
+node_modules/
+npm-debug.log
+yarn-error.log
+package-lock.json
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Build outputs
+dist/
+build/
+.dist/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker volumes
+postgres_data/
+
+# Logs
+logs/
+*.log
+
+# Database backups (keep directory structure)
+backups/wal_archive/*
+!backups/wal_archive/.gitkeep
+
+# Temporary files
+tmp/
+temp/
+*.tmp

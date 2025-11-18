@@ -1,0 +1,171 @@
+version: '3.8'
+
+services:
+  # Primary Database (OLTP)
+  postgres-primary:
+    image: postgres:16-alpine
+    container_name: olap_oltp_primary
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: movies_oltp
+      POSTGRES_INITDB_ARGS: "-c wal_level=replica -c max_wal_senders=3 -c max_replication_slots=3"
+    volumes:
+      - primary_data:/var/lib/postgresql/data
+      - ./ddl.sql:/docker-entrypoint-initdb.d/01-schema.sql
+      - ./scripts/init-primary.sql:/docker-entrypoint-initdb.d/02-replication.sql
+      - ./scripts/postgresql-primary.conf:/etc/postgresql/postgresql.conf
+      - ./scripts/pg_hba.conf:/etc/postgresql/pg_hba.conf
+      - ./backups/wal_archive:/var/lib/postgresql/wal_archive
+    ports:
+      - "5432:5432"
+    networks:
+      - olap_oltp_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf -c hba_file=/etc/postgresql/pg_hba.conf
+
+  # Hot Backup Database (Streaming Replication)
+  postgres-backup:
+    image: postgres:16-alpine
+    container_name: olap_oltp_backup
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - backup_data:/var/lib/postgresql/data
+      - ./scripts/postgresql-standby.conf:/etc/postgresql/postgresql.conf
+    ports:
+      - "5433:5432"
+    networks:
+      - olap_oltp_network
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres || exit 0"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command: >
+      bash -c "
+      if [ ! -s /var/lib/postgresql/data/pgdata/PG_VERSION ]; then
+        echo 'Setting up standby server...'
+        rm -rf /var/lib/postgresql/data/pgdata/*
+        until PGPASSWORD=replicator pg_basebackup -h postgres-primary -U replicator -D /var/lib/postgresql/data/pgdata -Fp -Xs -P -R; do
+          echo 'Waiting for primary...'
+          sleep 5
+        done
+        chown -R postgres:postgres /var/lib/postgresql/data/pgdata
+      fi
+      
+      exec docker-entrypoint.sh postgres -c config_file=/etc/postgresql/postgresql.conf
+      "
+
+  # Reports Database (OLAP)
+  postgres-reports:
+    image: postgres:16-alpine
+    container_name: olap_oltp_reports
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: movies_olap
+    volumes:
+      - reports_data:/var/lib/postgresql/data
+      - ./scripts/init-reports.sql:/docker-entrypoint-initdb.d/01-init-reports.sql
+    ports:
+      - "5434:5432"
+    networks:
+      - olap_oltp_network
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: olap_oltp_backend
+    environment:
+      NODE_ENV: production
+      DB_USER: postgres
+      DB_PASSWORD: password
+      DB_HOST: postgres-primary
+      DB_PORT: 5432
+      DB_NAME: movies_oltp
+      DB_HOST_REPORTS: postgres-reports
+      DB_NAME_REPORTS: movies_olap
+      PORT: 3000
+    ports:
+      - "3000:3000"
+    networks:
+      - olap_oltp_network
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+      postgres-reports:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: olap_oltp_frontend
+    ports:
+      - "80:80"
+    networks:
+      - olap_oltp_network
+    depends_on:
+      - backend
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # PgAdmin
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: olap_oltp_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "5050:80"
+    networks:
+      - olap_oltp_network
+    depends_on:
+      - postgres-primary
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    restart: unless-stopped
+
+volumes:
+  primary_data:
+  backup_data:
+  reports_data:
+  pgadmin_data:
+
+networks:
+  olap_oltp_network:
+    driver: bridge
+

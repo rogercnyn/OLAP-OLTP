@@ -7,176 +7,200 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// --- 1. ROBUST DATABASE CONFIGURATION ---
+// Primary Database Connection
 const pool = new Pool({
     user: process.env.DB_USER || 'postgres',
     host: process.env.DB_HOST || 'localhost',
-    database: 'movies_oltp',
+    database: process.env.DB_NAME || 'movies_oltp',
     password: process.env.DB_PASSWORD || 'password',
-    port: 5432,
-    // JMeter Optimization: Prevent crashing under load
-    max: 20, // Limit max connections
-    idleTimeoutMillis: 30000, // Close idle clients after 30s
-    connectionTimeoutMillis: 2000, // Fail fast if DB is full
+    port: parseInt(process.env.DB_PORT) || 5432,
+    max: 20,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 2000,
 });
 
-// Global error handler for the pool (prevents exit on idle client errors)
-pool.on('error', (err, client) => {
-    console.error('Unexpected error on idle client', err);
-    process.exit(-1);
+// Reports Database Connection
+const reportsPool = new Pool({
+    user: process.env.DB_USER || 'postgres',
+    host: process.env.DB_HOST_REPORTS || 'localhost',
+    database: process.env.DB_NAME_REPORTS || 'movies_olap',
+    password: process.env.DB_PASSWORD || 'password',
+    port: parseInt(process.env.DB_PORT_REPORTS) || 5434,
+    max: 10,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 2000,
 });
 
-// --- 2. API ROUTES ---
+pool.on('error', (err) => {
+    console.error('Database error:', err);
+});
 
-// Get Schedule (Movies for a specific date)
+reportsPool.on('error', (err) => {
+    console.error('Reports database error:', err);
+});
+
+// Health check
+app.get('/api/health', async (req, res) => {
+    try {
+        await pool.query('SELECT 1');
+        res.json({ status: 'healthy', timestamp: new Date().toISOString() });
+    } catch (err) {
+        res.status(503).json({ status: 'unhealthy', error: err.message });
+    }
+});
+
+app.get('/favicon.ico', (req, res) => res.status(204).end());
+
+app.get('/api', (req, res) => {
+    res.json({
+        name: 'Movie Booking API',
+        version: '1.0.0',
+        endpoints: {
+            health: '/api/health',
+            schedule: '/api/schedule?date=YYYY-MM-DD',
+            seats: '/api/showtimes/:id/seats',
+            book: 'POST /api/book'
+        }
+    });
+});
+
+// Get movie schedule for a specific date
 app.get('/api/schedule', async (req, res) => {
     const { date } = req.query; 
     try {
-        // FIXED: Changed "a.auditorium_id" to "a.id" in the JOIN condition
         const query = `
-            SELECT 
-                m.id as movie_id, m.title, m.duration_minutes, m.price,
-                a.name as cinema_name,
-                json_agg(json_build_object('id', s.id, 'time', to_char(s.start_time, 'HH24:MI'))) as showtimes
-            FROM showtimes s
-            JOIN movies m ON s.movie_id = m.id
-            JOIN auditoriums a ON s.auditorium_id = a.id 
-            WHERE DATE(s.start_time) = $1
-            GROUP BY m.id, m.title, m.duration_minutes, m.price, a.name
-            ORDER BY a.name;
+            SELECT m.id, m.title, m.genre, m.rating, m.poster_url
+            FROM movies m
+            WHERE EXISTS (
+                SELECT 1 FROM showtimes s 
+                WHERE s.movie_id = m.id AND DATE(s.show_datetime) = $1
+            )
         `;
         const result = await pool.query(query, [date]);
         res.json(result.rows);
     } catch (err) {
-        console.error("Schedule Error:", err.message); 
-        res.status(500).json({ error: 'Database error' });
+        console.error('Error fetching schedule:', err);
+        res.status(500).json({ error: 'Failed to fetch schedule' });
     }
 });
 
-// Get Seats for a specific showtime
+// Get showtimes and seats for a movie
 app.get('/api/showtimes/:id/seats', async (req, res) => {
     const { id } = req.params;
     try {
-        const query = `
+        const showtimesQuery = `
             SELECT 
-                s.id, s.row_code, s.number,
-                CASE 
-                    WHEN rh.id IS NOT NULL AND (rh.status = 'CONFIRMED') THEN 'TAKEN' 
-                    ELSE 'AVAILABLE' 
-                END as status
-            FROM seats s
-            JOIN showtimes st ON s.auditorium_id = st.auditorium_id
-            LEFT JOIN reservation_holds rh ON s.id = rh.seat_id AND rh.showtime_id = st.id
-            WHERE st.id = $1
-            ORDER BY s.row_code, s.number;
+                s.id, s.show_datetime, s.price,
+                a.name AS auditorium_name, a.capacity
+            FROM showtimes s
+            JOIN auditoriums a ON s.auditorium_id = a.id
+            WHERE s.movie_id = $1
+            ORDER BY s.show_datetime
         `;
-        const result = await pool.query(query, [id]);
-        res.json(result.rows);
+        const showtimesResult = await pool.query(showtimesQuery, [id]);
+
+        for (const showtime of showtimesResult.rows) {
+            const seatsQuery = `
+                SELECT seat_number, status
+                FROM seats
+                WHERE showtime_id = $1
+                ORDER BY seat_number
+            `;
+            const seatsResult = await pool.query(seatsQuery, [showtime.id]);
+            showtime.seats = seatsResult.rows;
+        }
+
+        res.json(showtimesResult.rows);
     } catch (err) {
-        console.error("Seat Fetch Error:", err.message);
-        res.status(500).json({ error: 'Database error' });
+        console.error('Error fetching seats:', err);
+        res.status(500).json({ error: 'Failed to fetch seats' });
     }
 });
 
-// --- 3. TRANSACTIONAL BOOKING (PESSIMISTIC LOCKING) ---
+// Book seats
 app.post('/api/book', async (req, res) => {
-    const { showtimeId, customerId, seatIds } = req.body;
-    
-    // Helper variable to ensure we release the client even if errors happen
-    let client;
+    const { showtimeId, seats, customerName, customerEmail, paymentMethod, paymentAmount } = req.body;
+    const client = await pool.connect();
 
     try {
-        // A. CONNECT (Inside Try/Catch to handle connection exhaustion)
-        client = await pool.connect();
-        
         await client.query('BEGIN');
 
-        // B. DEADLOCK AVOIDANCE: Sort IDs to always lock in same order
-        const sortedSeatIds = [...seatIds].sort((a, b) => a - b);
+        // Sort seat IDs to avoid deadlocks
+        const sortedSeatIds = seats.map(s => s.id).sort((a, b) => a - b);
 
-        // C. PESSIMISTIC LOCKING (FOR UPDATE)
-        for (const seatId of sortedSeatIds) {
-            // Lock the specific seat row.
-            // This makes other transactions WAIT here if they try to book the same seat.
-            await client.query('SELECT id FROM seats WHERE id = $1 FOR UPDATE', [seatId]);
+        // Lock seats
+        const lockQuery = `
+            SELECT seat_number, status
+            FROM seats
+            WHERE id = ANY($1::int[]) AND showtime_id = $2
+            ORDER BY id
+            FOR UPDATE
+        `;
+        const lockResult = await client.query(lockQuery, [sortedSeatIds, showtimeId]);
 
-            // Double check status after acquiring the lock
-            const existingHold = await client.query(`
-                SELECT id FROM reservation_holds 
-                WHERE showtime_id = $1 AND seat_id = $2
-            `, [showtimeId, seatId]);
-
-            if (existingHold.rows.length > 0) {
-                throw new Error(`Seat ${seatId} is already booked.`);
-            }
+        // Check if all seats are available
+        const unavailableSeats = lockResult.rows.filter(s => s.status !== 'available');
+        if (unavailableSeats.length > 0) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({
+                error: 'Some seats are no longer available',
+                unavailable: unavailableSeats.map(s => s.seat_number)
+            });
         }
 
-        // D. CALCULATE PRICE
-        const priceRes = await client.query(`
-            SELECT m.price 
-            FROM showtimes s 
-            JOIN movies m ON s.movie_id = m.id 
-            WHERE s.id = $1
-        `, [showtimeId]);
-        
-        const pricePerSeat = parseFloat(priceRes.rows[0].price);
-        const totalAmount = pricePerSeat * seatIds.length;
-
-        // E. PROCESS PAYMENT RECORD
-        const payRes = await client.query(`
-            INSERT INTO payments (customer_id, amount, payment_method)
-            VALUES ($1, $2, 'CREDIT_CARD')
+        // Insert customer
+        const customerInsert = `
+            INSERT INTO customers (name, email)
+            VALUES ($1, $2)
             RETURNING id
-        `, [customerId, totalAmount]);
-        const paymentId = payRes.rows[0].id;
+        `;
+        const customerResult = await client.query(customerInsert, [customerName, customerEmail]);
+        const customerId = customerResult.rows[0].id;
 
-        // F. INSERT RESERVATIONS & TICKETS
-        for (const seatId of sortedSeatIds) {
-            // Create Hold
-            const holdRes = await client.query(`
-                INSERT INTO reservation_holds (showtime_id, seat_id, customer_id, hold_expires_at, status)
-                VALUES ($1, $2, $3, NOW() + INTERVAL '1 year', 'CONFIRMED')
-                RETURNING id
-            `, [showtimeId, seatId, customerId]);
+        // Insert payment
+        const paymentInsert = `
+            INSERT INTO payments (customer_id, amount, payment_method, status)
+            VALUES ($1, $2, $3, 'completed')
+            RETURNING id
+        `;
+        const paymentResult = await client.query(paymentInsert, [customerId, paymentAmount, paymentMethod]);
+        const paymentId = paymentResult.rows[0].id;
 
-            // Create Ticket
-            await client.query(`
-                INSERT INTO tickets (reservation_id, payment_id, price)
-                VALUES ($1, $2, $3)
-            `, [holdRes.rows[0].id, paymentId, pricePerSeat]);
-        }
+        // Update seats to booked
+        const updateSeats = `
+            UPDATE seats
+            SET status = 'booked'
+            WHERE id = ANY($1::int[])
+        `;
+        await client.query(updateSeats, [sortedSeatIds]);
+
+        // Create tickets
+        const ticketInserts = seats.map(seat => {
+            return client.query(
+                `INSERT INTO tickets (showtime_id, seat_id, customer_id, payment_id, price)
+                 VALUES ($1, $2, $3, $4, $5)`,
+                [showtimeId, seat.id, customerId, paymentId, seat.price]
+            );
+        });
+        await Promise.all(ticketInserts);
 
         await client.query('COMMIT');
-        res.status(201).json({ message: 'Booking & Payment Successful!', total: totalAmount });
-
-    } catch (error) {
-        // Only attempt rollback if we actually got a client connection
-        if (client) {
-            try { await client.query('ROLLBACK'); } catch (e) {}
-        }
-
-        // Handle Specific Errors for better UI/JMeter feedback
-        if (error.message.includes('already booked') || error.code === '23505') {
-             res.status(409).json({ error: 'Seats just taken.' });
-        } else if (error.code === '40P01') {
-             res.status(409).json({ error: 'Deadlock detected, please retry.' });
-        } else {
-            console.error("Transaction Error:", error.message);
-            res.status(500).json({ error: 'Transaction failed' });
-        }
+        res.json({ success: true, paymentId, customerId });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('Booking error:', err);
+        res.status(500).json({ error: 'Booking failed', details: err.message });
     } finally {
-        // CRITICAL: Release the client back to the pool
-        if (client) client.release();
+        client.release();
     }
 });
 
-// --- 4. PROCESS SAFETY NET (Prevents Node Process from Exiting) ---
 process.on('uncaughtException', (err) => {
-    console.error('CRITICAL: Uncaught Exception:', err);
+    console.error('Uncaught Exception:', err);
 });
 
-process.on('unhandledRejection', (reason, promise) => {
-    console.error('CRITICAL: Unhandled Rejection:', reason);
+process.on('unhandledRejection', (reason) => {
+    console.error('Unhandled Rejection:', reason);
 });
 
 const PORT = 3000;
