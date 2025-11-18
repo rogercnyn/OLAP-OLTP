@@ -1,10 +1,6 @@
--- =============================================
--- MOVIE BOOKING SYSTEM - MASTER INIT SCRIPT (v2 with Payments)
--- =============================================
-
 -- 1. CLEANUP
 DROP TABLE IF EXISTS tickets CASCADE;
-DROP TABLE IF EXISTS payments CASCADE; -- NEW
+DROP TABLE IF EXISTS payments CASCADE; 
 DROP TABLE IF EXISTS reservation_holds CASCADE;
 DROP TABLE IF EXISTS seats CASCADE;
 DROP TABLE IF EXISTS showtimes CASCADE;
@@ -24,7 +20,7 @@ CREATE TABLE movies (
     id SERIAL PRIMARY KEY,
     title VARCHAR(255) NOT NULL,
     duration_minutes INT,
-    price DECIMAL(10, 2) NOT NULL -- NEW: Price column
+    price DECIMAL(10, 2) NOT NULL
 );
 
 CREATE TABLE auditoriums (
@@ -58,7 +54,7 @@ CREATE TABLE reservation_holds (
     UNIQUE(showtime_id, seat_id) 
 );
 
--- NEW: Payments Table (For Sales Reports)
+-- Payments Table (For Sales Reports)
 CREATE TABLE payments (
     id SERIAL PRIMARY KEY,
     customer_id INT REFERENCES customers(id),
@@ -67,7 +63,7 @@ CREATE TABLE payments (
     payment_method VARCHAR(50) DEFAULT 'CREDIT_CARD'
 );
 
--- UPDATED: Tickets now link to the Payment
+-- Tickets now link to the Payment
 CREATE TABLE tickets (
     id SERIAL PRIMARY KEY,
     reservation_id INT REFERENCES reservation_holds(id),
@@ -75,15 +71,12 @@ CREATE TABLE tickets (
     price DECIMAL(10, 2)
 );
 
--- 3. DATA SEEDING
-
 INSERT INTO customers (email, name) VALUES ('user@test.com', 'Guest User');
 
 INSERT INTO auditoriums (name, total_seats) VALUES 
 ('Cinema 1', 200), ('Cinema 2', 200), ('Cinema 3', 200), 
 ('Cinema 4', 200), ('Cinema 5', 200), ('Cinema 6', 200);
 
--- NEW: Insert Movies with specific PRICES
 INSERT INTO movies (title, duration_minutes, price) VALUES 
 ('Quezon', 150, 350.00),
 ('Predator: Badlands', 120, 380.00),
@@ -92,7 +85,6 @@ INSERT INTO movies (title, duration_minutes, price) VALUES
 ('Wicked: For Good', 160, 400.00),
 ('Meet, Greet & Bye', 95, 350.00);
 
--- Generate Seats (Rows A-J, 1-20)
 INSERT INTO seats (auditorium_id, row_code, number)
 SELECT a.id, r.code, s.num
 FROM auditoriums a
