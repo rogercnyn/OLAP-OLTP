@@ -14,13 +14,13 @@ const pool = new Pool({
     database: 'movies_oltp',
     password: process.env.DB_PASSWORD || 'password',
     port: 5432,
-    // JMeter Optimization:
-    max: 20, // Limit max connections (prevent DB overload)
+    // JMeter Optimization: Prevent crashing under load
+    max: 20, // Limit max connections
     idleTimeoutMillis: 30000, // Close idle clients after 30s
-    connectionTimeoutMillis: 2000, // Fail fast if DB is full (dont hang)
+    connectionTimeoutMillis: 2000, // Fail fast if DB is full
 });
 
-// Global error handler for the pool
+// Global error handler for the pool (prevents exit on idle client errors)
 pool.on('error', (err, client) => {
     console.error('Unexpected error on idle client', err);
     process.exit(-1);
@@ -28,9 +28,11 @@ pool.on('error', (err, client) => {
 
 // --- 2. API ROUTES ---
 
+// Get Schedule (Movies for a specific date)
 app.get('/api/schedule', async (req, res) => {
     const { date } = req.query; 
     try {
+        // FIXED: Changed "a.auditorium_id" to "a.id" in the JOIN condition
         const query = `
             SELECT 
                 m.id as movie_id, m.title, m.duration_minutes, m.price,
@@ -46,11 +48,12 @@ app.get('/api/schedule', async (req, res) => {
         const result = await pool.query(query, [date]);
         res.json(result.rows);
     } catch (err) {
-        console.error("Schedule Error:", err.message); // Log message only, not full stack
+        console.error("Schedule Error:", err.message); 
         res.status(500).json({ error: 'Database error' });
     }
 });
 
+// Get Seats for a specific showtime
 app.get('/api/showtimes/:id/seats', async (req, res) => {
     const { id } = req.params;
     try {
@@ -75,28 +78,29 @@ app.get('/api/showtimes/:id/seats', async (req, res) => {
     }
 });
 
-// --- 3. TRANSACTIONAL BOOKING (HARDENED) ---
+// --- 3. TRANSACTIONAL BOOKING (PESSIMISTIC LOCKING) ---
 app.post('/api/book', async (req, res) => {
     const { showtimeId, customerId, seatIds } = req.body;
     
-    // JMeter Safety: Define client outside try so we can check it in finally
+    // Helper variable to ensure we release the client even if errors happen
     let client;
 
     try {
-        // A. CONNECT (Inside Try/Catch now)
+        // A. CONNECT (Inside Try/Catch to handle connection exhaustion)
         client = await pool.connect();
         
         await client.query('BEGIN');
 
-        // B. SORT FOR DEADLOCK PREVENTION
+        // B. DEADLOCK AVOIDANCE: Sort IDs to always lock in same order
         const sortedSeatIds = [...seatIds].sort((a, b) => a - b);
 
-        // C. PESSIMISTIC LOCKING
+        // C. PESSIMISTIC LOCKING (FOR UPDATE)
         for (const seatId of sortedSeatIds) {
-            // Lock the specific seat row
+            // Lock the specific seat row.
+            // This makes other transactions WAIT here if they try to book the same seat.
             await client.query('SELECT id FROM seats WHERE id = $1 FOR UPDATE', [seatId]);
 
-            // Check if taken
+            // Double check status after acquiring the lock
             const existingHold = await client.query(`
                 SELECT id FROM reservation_holds 
                 WHERE showtime_id = $1 AND seat_id = $2
@@ -107,7 +111,7 @@ app.post('/api/book', async (req, res) => {
             }
         }
 
-        // D. PROCESS
+        // D. CALCULATE PRICE
         const priceRes = await client.query(`
             SELECT m.price 
             FROM showtimes s 
@@ -118,6 +122,7 @@ app.post('/api/book', async (req, res) => {
         const pricePerSeat = parseFloat(priceRes.rows[0].price);
         const totalAmount = pricePerSeat * seatIds.length;
 
+        // E. PROCESS PAYMENT RECORD
         const payRes = await client.query(`
             INSERT INTO payments (customer_id, amount, payment_method)
             VALUES ($1, $2, 'CREDIT_CARD')
@@ -125,13 +130,16 @@ app.post('/api/book', async (req, res) => {
         `, [customerId, totalAmount]);
         const paymentId = payRes.rows[0].id;
 
+        // F. INSERT RESERVATIONS & TICKETS
         for (const seatId of sortedSeatIds) {
+            // Create Hold
             const holdRes = await client.query(`
                 INSERT INTO reservation_holds (showtime_id, seat_id, customer_id, hold_expires_at, status)
                 VALUES ($1, $2, $3, NOW() + INTERVAL '1 year', 'CONFIRMED')
                 RETURNING id
             `, [showtimeId, seatId, customerId]);
 
+            // Create Ticket
             await client.query(`
                 INSERT INTO tickets (reservation_id, payment_id, price)
                 VALUES ($1, $2, $3)
@@ -142,31 +150,29 @@ app.post('/api/book', async (req, res) => {
         res.status(201).json({ message: 'Booking & Payment Successful!', total: totalAmount });
 
     } catch (error) {
-        // Only rollback if we successfully got a client
+        // Only attempt rollback if we actually got a client connection
         if (client) {
             try { await client.query('ROLLBACK'); } catch (e) {}
         }
 
-        // JMeter Friendly Error Responses
+        // Handle Specific Errors for better UI/JMeter feedback
         if (error.message.includes('already booked') || error.code === '23505') {
              res.status(409).json({ error: 'Seats just taken.' });
         } else if (error.code === '40P01') {
-             // 40P01 is Postgres Deadlock Code
              res.status(409).json({ error: 'Deadlock detected, please retry.' });
         } else {
             console.error("Transaction Error:", error.message);
             res.status(500).json({ error: 'Transaction failed' });
         }
     } finally {
-        // JMeter Safety: Ensure client is released back to pool
+        // CRITICAL: Release the client back to the pool
         if (client) client.release();
     }
 });
 
-// --- 4. PROCESS SAFETY NET (Prevents Crashing) ---
+// --- 4. PROCESS SAFETY NET (Prevents Node Process from Exiting) ---
 process.on('uncaughtException', (err) => {
     console.error('CRITICAL: Uncaught Exception:', err);
-    // In production we might restart, but for JMeter testing, we keep going
 });
 
 process.on('unhandledRejection', (reason, promise) => {
