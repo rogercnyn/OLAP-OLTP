@@ -1,16 +1,6 @@
 # 🎬 Movie Booking System - OLAP-OLTP Project
 
-A full-stack movie seat reservation system with real-time analytics, demonstrating **OLTP (transactional)** and **OLAP (analytical)** database operations with PostgreSQL replication.
-
-## ✨ Features
-
-- 🎟️ **Real-time Seat Booking** - Book multiple seats with race condition protection
-- 📊 **Analytics Dashboard** - Beautiful dark mode charts with revenue trends, movie performance, and time slot analysis
-- 🔄 **Database Replication** - Streaming + logical replication for backup and analytics
-- 🎨 **Modern UI** - React with glassmorphism design and animated gradients
-- 🚀 **Dockerized** - One command to start everything
-
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 - Docker Desktop installed and running
@@ -32,20 +22,6 @@ docker-compose ps  # Check all services are "healthy"
 - **🎬 Movie Booking:** http://localhost
 - **📊 Analytics Dashboard:** http://localhost/analytics
 - **🗄️ Database Admin:** http://localhost:5050 (admin@admin.com / admin)
-
-That's it! 🎉
-
-## 📊 What's Inside
-
-### 3 PostgreSQL Databases
-1. **Primary (OLTP)** - Port 5432 - Handles all bookings and transactions
-2. **Backup** - Port 5433 - Hot standby with streaming replication
-3. **Reports (OLAP)** - Port 5434 - Analytics database with star schema
-
-### Frontend + Backend
-- **React** - Modern booking interface with dark mode analytics
-- **Node.js/Express** - REST API with dual database pools
-- **Nginx** - Reverse proxy serving both frontend and API
 
 ## 🎯 Try It Out
 
@@ -105,74 +81,7 @@ docker run --rm --network olap_oltp_network \
 # Results: ~120 req/sec, 18ms avg, 0 double bookings ✅
 ```
 
-## 🏗️ Architecture
-
-```
-┌─────────────────────────────────────────────────┐
-│          Docker Compose Environment             │
-│                                                 │
-│  ┌──────────┐         ┌──────────────┐        │
-│  │  Nginx   │────────▶│   React      │        │
-│  │  :80     │         │   Frontend   │        │
-│  └─────┬────┘         └──────────────┘        │
-│        │                                        │
-│        │ /api/*                                 │
-│        ▼                                        │
-│  ┌──────────────┐                              │
-│  │   Express    │                              │
-│  │   Backend    │                              │
-│  │   :3000      │                              │
-│  └───┬──────┬───┘                              │
-│      │      │                                   │
-│      │      └────────┐                          │
-│      │ OLTP          │ OLAP                     │
-│      ▼               ▼                          │
-│  ┌──────────┐   ┌──────────┐                  │
-│  │ Primary  │   │ Reports  │                  │
-│  │   DB     │──▶│    DB    │                  │
-│  │ :5432    │   │  :5434   │                  │
-│  └─────┬────┘   └──────────┘                  │
-│        │           ▲                            │
-│        │ Streaming │ Logical                    │
-│        │ Replica   │ Replica                    │
-│        ▼           │                            │
-│  ┌──────────┐     │                            │
-│  │  Backup  │─────┘                            │
-│  │    DB    │                                  │
-│  │  :5433   │                                  │
-│  └──────────┘                                  │
-│                                                 │
-│  ┌──────────┐                                  │
-│  │ PgAdmin  │ (Optional - DB Management)      │
-│  │  :5050   │                                  │
-│  └──────────┘                                  │
-└─────────────────────────────────────────────────┘
-```
-
-### Key Technologies
-- **Frontend:** React 19 + Vite + Recharts (charts)
-- **Backend:** Node.js + Express with connection pooling
-- **Database:** PostgreSQL 16 with replication
-- **Deployment:** Docker Compose with 6 containers
-
-## 🎓 What This Demonstrates
-
-### OLTP (Transactional Processing)
-- ✅ **Race Condition Handling** - `SELECT FOR UPDATE` with deadlock avoidance
-- ✅ **ACID Transactions** - All-or-nothing booking with proper rollback
-- ✅ **Connection Pooling** - Optimized for high concurrency
-
-### OLAP (Analytical Processing)
-- ✅ **Star Schema** - Fact table with dimension tables for fast queries
-- ✅ **ETL Pipeline** - Transform OLTP data into OLAP warehouse
-- ✅ **Aggregated Reports** - Pre-computed analytics for dashboard
-
-### High Availability
-- ✅ **Streaming Replication** - Physical backup server (hot standby)
-- ✅ **Logical Replication** - Real-time sync to analytics database
-- ✅ **WAL Archiving** - Point-in-time recovery capability
-
-## � Project Structure
+##  Project Structure
 
 ```
 OLAP-OLTP/
@@ -244,17 +153,7 @@ npm install
 node server.js  # Runs on http://localhost:3000
 ```
 
-## 🎯 Next Steps
+<img width="1240" height="597" alt="image" src="https://github.com/user-attachments/assets/3393fe2c-d298-4916-9328-b24d436e21a7" />
+<img width="391" height="810" alt="image" src="https://github.com/user-attachments/assets/b23fed8a-2f55-4203-a381-47a43ca89bed" />
 
-- [ ] Add more analytics visualizations
-- [ ] Implement automatic failover testing
-- [ ] Add Prometheus/Grafana monitoring
-- [ ] Create API documentation with Swagger
 
-## 📄 License
-
-Educational project for database systems coursework.
-
----
-
-**Questions?** Check the logs: `docker-compose logs -f`
