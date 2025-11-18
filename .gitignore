@@ -36,6 +36,10 @@ logs/
 backups/wal_archive/*
 !backups/wal_archive/.gitkeep
 
+# JMeter test results (generated files)
+results/
+*.jtl
+
 # Temporary files
 tmp/
 temp/
