@@ -90,6 +90,12 @@ function Analytics() {
     return acc;
   }, []);
 
+  // Sort time of day in logical order
+  const timeOrder = ['Morning', 'Afternoon', 'Evening', 'Night', 'Late Night'];
+  const sortedTimeOfDayData = timeOfDayData.sort((a, b) => {
+    return timeOrder.indexOf(a.time_of_day) - timeOrder.indexOf(b.time_of_day);
+  });
+
   return (
     <div className="analytics-container">
       <h1>Analytics Dashboard</h1>
@@ -120,12 +126,15 @@ function Analytics() {
       <div className="chart-section">
         <h2>Revenue Trend</h2>
         <p className="chart-subtitle">Daily revenue over the last 30 days</p>
-        <ResponsiveContainer width="100%" height={320}>
-          <AreaChart data={revenueData}>
+        <ResponsiveContainer width="100%" height={380}>
+          <AreaChart 
+            data={revenueData}
+            margin={{ top: 10, right: 30, left: 20, bottom: 5 }}
+          >
             <defs>
               <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor={APPLE_COLORS.blue} stopOpacity={0.3}/>
-                <stop offset="95%" stopColor={APPLE_COLORS.blue} stopOpacity={0}/>
+                <stop offset="5%" stopColor={APPLE_COLORS.blue} stopOpacity={0.4}/>
+                <stop offset="95%" stopColor={APPLE_COLORS.blue} stopOpacity={0.05}/>
               </linearGradient>
             </defs>
             <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
@@ -141,14 +150,24 @@ function Analytics() {
               style={{ fontSize: '0.85em' }}
               tickLine={false}
               axisLine={false}
-              tickFormatter={(value) => `₱${value.toLocaleString()}`}
+              tickFormatter={(value) => {
+                if (value >= 1000000) {
+                  return `₱${(value / 1000000).toFixed(1)}M`;
+                }
+                if (value >= 1000) {
+                  return `₱${Math.round(value / 1000)}k`;
+                }
+                return `₱${value}`;
+              }}
+              width={75}
             />
             <Tooltip 
               contentStyle={{
-                backgroundColor: '#1a1a1a',
-                border: '1px solid #333',
+                backgroundColor: 'rgba(26, 26, 26, 0.95)',
+                backdropFilter: 'blur(20px)',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
                 borderRadius: '12px',
-                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.5)',
+                boxShadow: '0 8px 32px rgba(0, 0, 0, 0.6)',
                 padding: '12px 16px',
                 color: '#ffffff'
               }}
@@ -162,7 +181,7 @@ function Analytics() {
               strokeWidth={3}
               fill="url(#colorRevenue)"
               dot={{ fill: APPLE_COLORS.blue, strokeWidth: 2, r: 4 }}
-              activeDot={{ r: 6, strokeWidth: 0 }}
+              activeDot={{ r: 7, strokeWidth: 0, fill: APPLE_COLORS.blue }}
             />
           </AreaChart>
         </ResponsiveContainer>
@@ -217,8 +236,8 @@ function Analytics() {
               cy="50%" 
               innerRadius="20%" 
               outerRadius="90%" 
-              data={timeOfDayData.map((slot, index) => {
-                const maxCount = Math.max(...timeOfDayData.map(d => d.booking_count));
+              data={sortedTimeOfDayData.map((slot, index) => {
+                const maxCount = Math.max(...sortedTimeOfDayData.map(d => d.booking_count));
                 return {
                   ...slot,
                   fill: CHART_COLORS[index % CHART_COLORS.length],
@@ -237,22 +256,34 @@ function Analytics() {
               />
               <Tooltip 
                 contentStyle={{
-                  backgroundColor: '#1a1a1a',
-                  border: '1px solid #444',
+                  backgroundColor: 'rgba(26, 26, 26, 0.95)',
+                  backdropFilter: 'blur(20px)',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
                   borderRadius: '12px',
-                  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.6)',
+                  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.6)',
                   padding: '16px 20px',
                   color: '#ffffff'
                 }}
-                formatter={(value, name, props) => [
-                  `${props.payload.booking_count} bookings - ₱${parseFloat(props.payload.revenue).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`,
-                  props.payload.time_of_day
-                ]}
+                labelStyle={{ display: 'none' }}
+                itemStyle={{ color: '#ffffff' }}
+                formatter={(value, name, props) => {
+                  return [
+                    <div key="content" style={{ fontSize: '0.95em', lineHeight: '1.6' }}>
+                      <div style={{ fontWeight: 'bold', marginBottom: '4px', fontSize: '1.05em' }}>
+                        {props.payload.time_of_day}
+                      </div>
+                      <div>{props.payload.booking_count} bookings</div>
+                      <div style={{ color: '#34c759', fontWeight: '600' }}>
+                        ₱{parseFloat(props.payload.revenue).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                      </div>
+                    </div>
+                  ];
+                }}
               />
             </RadialBarChart>
           </ResponsiveContainer>
           <div className="radial-legend">
-            {timeOfDayData.map((slot, index) => (
+            {sortedTimeOfDayData.map((slot, index) => (
               <div key={index} className="radial-legend-item">
                 <span 
                   className="legend-color" 

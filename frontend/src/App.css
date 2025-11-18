@@ -11,10 +11,31 @@
 
 body {
   margin: 0;
-  background-color: var(--bg-color);
+  background: radial-gradient(circle at 20% 30%, rgba(0, 122, 255, 0.15) 0%, transparent 50%),
+              radial-gradient(circle at 80% 70%, rgba(88, 86, 214, 0.15) 0%, transparent 50%),
+              radial-gradient(circle at 40% 80%, rgba(52, 199, 89, 0.12) 0%, transparent 50%),
+              radial-gradient(circle at 60% 20%, rgba(255, 55, 95, 0.12) 0%, transparent 50%),
+              radial-gradient(circle at 90% 40%, rgba(90, 200, 250, 0.1) 0%, transparent 50%),
+              linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%);
+  background-size: 200% 200%;
+  animation: gradientShift 30s ease infinite;
+  background-attachment: fixed;
   color: var(--text-primary);
   font-family: 'Inter', sans-serif;
   overflow-x: hidden;
+  min-height: 100vh;
+}
+
+@keyframes gradientShift {
+  0%, 100% { 
+    background-position: 0% 50%, 100% 50%, 50% 100%, 50% 0%, 100% 100%, center;
+  }
+  33% { 
+    background-position: 100% 50%, 0% 50%, 100% 0%, 0% 100%, 50% 50%, center;
+  }
+  66% { 
+    background-position: 50% 0%, 50% 100%, 0% 50%, 100% 50%, 0% 0%, center;
+  }
 }
 
 .app-container {
@@ -37,20 +58,26 @@ h1 {
   font-weight: 800;
   font-size: 2rem;
   letter-spacing: -1px;
-  background: linear-gradient(to right, #fff, #aaa);
+  background: linear-gradient(135deg, #fff 0%, #aaa 100%);
+  background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   margin: 0;
+  text-shadow: 0 2px 20px rgba(255, 255, 255, 0.1);
 }
 
 select.date-picker {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
   color: white;
-  border: 1px solid #333;
+  border: 1.5px solid rgba(255, 255, 255, 0.15);
   padding: 12px 24px;
   border-radius: 30px;
   font-size: 1rem;
   cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
 .nav-btn {
@@ -62,17 +89,19 @@ select.date-picker {
   font-size: 1rem;
   cursor: pointer;
   font-weight: 600;
-  transition: transform 0.2s, box-shadow 0.2s;
+  transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
 }
 
 .nav-btn:hover {
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+  box-shadow: 0 8px 20px rgba(102, 126, 234, 0.5);
 }
 
 select.date-picker:hover {
-  background: rgba(255, 255, 255, 0.2);
-  border-color: #666;
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.25);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3);
 }
 
 /* --- MOVIES GRID --- */
@@ -83,19 +112,25 @@ select.date-picker:hover {
 }
 
 .movie-card {
-  background: var(--card-bg);
-  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(50px) saturate(200%);
+  -webkit-backdrop-filter: blur(50px) saturate(200%);
+  border-radius: 16px;
   overflow: hidden;
-  transition: transform 0.3s ease, box-shadow 0.3s ease;
-  border: 1px solid transparent;
+  transition: all 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  border: 1.5px solid rgba(255, 255, 255, 0.12);
   display: flex;
   flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3),
+              0 0 0 1px rgba(255, 255, 255, 0.05) inset;
 }
 
 .movie-card:hover {
   transform: translateY(-8px);
-  border-color: #333;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  border-color: rgba(255, 255, 255, 0.2);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4),
+              0 0 0 1px rgba(255, 255, 255, 0.1) inset;
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .poster-wrapper {
@@ -177,10 +212,17 @@ select.date-picker:hover {
 }
 
 .modal-content {
-  background: #1a1a1a; padding: 40px; border-radius: 20px;
-  text-align: center; max-width: 500px; width: 100%;
-  border: 1px solid #333;
-  box-shadow: 0 20px 50px rgba(0,0,0,0.8);
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(60px) saturate(200%);
+  -webkit-backdrop-filter: blur(60px) saturate(200%);
+  padding: 40px;
+  border-radius: 24px;
+  text-align: center;
+  max-width: 500px;
+  width: 100%;
+  border: 1.5px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6),
+              0 0 0 1px rgba(255, 255, 255, 0.1) inset;
   position: relative;
 }
 
@@ -322,4 +364,35 @@ select.date-picker:hover {
   margin-bottom: 20px;
   padding-bottom: 20px;
   border-bottom: 1px solid #333;
+}
+
+/* Scrollbar Styles */
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.02);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-corner {
+  background: rgba(255, 255, 255, 0.02);
 }
