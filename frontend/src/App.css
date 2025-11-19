@@ -217,8 +217,8 @@ select.date-picker:hover {
   padding: 40px;
   border-radius: 24px;
   text-align: center;
-  max-width: 1000px; 
-  width: 100%; 
+  max-width: 700px; 
+  width: 90%; 
   border: 1.5px solid rgba(255, 255, 255, 0.15);
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6),
               0 0 0 1px rgba(255, 255, 255, 0.1) inset;
