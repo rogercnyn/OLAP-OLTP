@@ -118,8 +118,14 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           showtimeId: selectedShowtime.id,
-          customerId: 1,
-          seatIds: selectedSeats
+          seats: selectedSeats.map(id => ({
+            id,
+            price: selectedShowtime.price
+          })),
+          customerName: paymentDetails.name,
+          customerEmail: "test@example.com", 
+          paymentMethod: "card",
+          paymentAmount: selectedSeats.length * selectedShowtime.price
         })
       });
 

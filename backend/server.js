@@ -129,67 +129,69 @@ app.post('/api/book', async (req, res) => {
     try {
         await client.query('BEGIN');
 
-        // Sort seat IDs to avoid deadlocks
-        const sortedSeatIds = seats.map(s => s.id).sort((a, b) => a - b);
-
-        // Lock seats
-        const lockQuery = `
-            SELECT seat_number, status
-            FROM seats
-            WHERE id = ANY($1::int[]) AND showtime_id = $2
-            ORDER BY id
-            FOR UPDATE
-        `;
-        const lockResult = await client.query(lockQuery, [sortedSeatIds, showtimeId]);
-
-        // Check if all seats are available
-        const unavailableSeats = lockResult.rows.filter(s => s.status !== 'available');
-        if (unavailableSeats.length > 0) {
-            await client.query('ROLLBACK');
-            return res.status(409).json({
-                error: 'Some seats are no longer available',
-                unavailable: unavailableSeats.map(s => s.seat_number)
-            });
+        // 1. Get or Create Customer (Prevents duplicate email errors)
+        let customerId;
+        const checkCustomer = await client.query('SELECT id FROM customers WHERE email = $1', [customerEmail]);
+        
+        if (checkCustomer.rows.length > 0) {
+            customerId = checkCustomer.rows[0].id;
+        } else {
+            const customerInsert = `
+                INSERT INTO customers (name, email)
+                VALUES ($1, $2)
+                RETURNING id
+            `;
+            const customerResult = await client.query(customerInsert, [customerName, customerEmail]);
+            customerId = customerResult.rows[0].id;
         }
 
-        // Insert customer
-        const customerInsert = `
-            INSERT INTO customers (name, email)
-            VALUES ($1, $2)
-            RETURNING id
-        `;
-        const customerResult = await client.query(customerInsert, [customerName, customerEmail]);
-        const customerId = customerResult.rows[0].id;
-
-        // Insert payment
+        // 2. Insert Payment
         const paymentInsert = `
-            INSERT INTO payments (customer_id, amount, payment_method, status)
-            VALUES ($1, $2, $3, 'completed')
+            INSERT INTO payments (customer_id, amount, payment_method)
+            VALUES ($1, $2, $3)
             RETURNING id
         `;
         const paymentResult = await client.query(paymentInsert, [customerId, paymentAmount, paymentMethod]);
         const paymentId = paymentResult.rows[0].id;
 
-        // Update seats to booked
-        const updateSeats = `
-            UPDATE seats
-            SET status = 'booked'
-            WHERE id = ANY($1::int[])
-        `;
-        await client.query(updateSeats, [sortedSeatIds]);
+        // 3. Process each seat
+        // Instead of locking the "seats" table, we try to insert a reservation.
+        // If the insert fails, the seat is taken.
+        for (const seat of seats) {
+            try {
+                // Create Reservation (This acts as the "Lock")
+                const reservationInsert = `
+                    INSERT INTO reservation_holds (showtime_id, seat_id, customer_id, hold_expires_at, status)
+                    VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour', 'CONFIRMED')
+                    RETURNING id
+                `;
+                const reservationResult = await client.query(reservationInsert, [showtimeId, seat.id, customerId]);
+                const reservationId = reservationResult.rows[0].id;
 
-        // Create tickets
-        const ticketInserts = seats.map(seat => {
-            return client.query(
-                `INSERT INTO tickets (showtime_id, seat_id, customer_id, payment_id, price)
-                 VALUES ($1, $2, $3, $4, $5)`,
-                [showtimeId, seat.id, customerId, paymentId, seat.price]
-            );
-        });
-        await Promise.all(ticketInserts);
+                // Create Ticket
+                await client.query(
+                    `INSERT INTO tickets (reservation_id, payment_id, price)
+                     VALUES ($1, $2, $3)`,
+                    [reservationId, paymentId, seat.price]
+                );
+
+            } catch (err) {
+                // Error code '23505' means a unique constraint violation (Seat already booked)
+                if (err.code === '23505') {
+                    await client.query('ROLLBACK');
+                    return res.status(409).json({
+                        error: 'One or more seats are already taken.',
+                        details: `Seat ID ${seat.id} is unavailable.`
+                    });
+                } else {
+                    throw err; // Throw other errors to the main catch block
+                }
+            }
+        }
 
         await client.query('COMMIT');
         res.json({ success: true, paymentId, customerId });
+
     } catch (err) {
         await client.query('ROLLBACK');
         console.error('Booking error:', err);
