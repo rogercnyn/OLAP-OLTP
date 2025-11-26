@@ -94,7 +94,7 @@ services:
   backend:
     build:
       context: ./backend
-      dockerfile: Dockerfile
+      dockerfile: ./backend/Dockerfile
     container_name: olap_oltp_backend
     environment:
       NODE_ENV: production
@@ -127,7 +127,7 @@ services:
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile
+      dockerfile: ./frontend/Dockerfile
     container_name: olap_oltp_frontend
     ports:
       - "80:80"
