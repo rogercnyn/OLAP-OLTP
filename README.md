@@ -120,7 +120,7 @@ docker stack deploy -c docker-compose.yml myapp
 ### Generate Test Data
 ```bash
 # Get primary container ID
-$primaryId = docker ps -q -f "name=myapp_postgres-primary"
+primaryId=$(docker ps -q -f "name=myapp_postgres-primary")
 
 # Generate realistic test data (5,000 bookings)
 cat scripts/generate-realistic-dataset.sql | docker exec -i $primaryId psql -U postgres -d movies_oltp
