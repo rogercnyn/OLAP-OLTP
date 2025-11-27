@@ -39,13 +39,13 @@ docker stack services myapp
 ## 🎯 Try It Out
 
 ### 1. Book Movie Seats
-1. Go to http://localhost
+1. Go to http://72.61.112.223
 2. Select a date and movie
 3. Click time slots to choose seats
 4. Fill payment form and book
 
 ### 2. View Analytics
-1. Go to http://localhost/analytics
+1. Go to http://72.61.112.223/analytics
 2. See revenue trends, top movies, and peak booking hours
 3. Interactive charts with hover details
 4. **Note:** Analytics update every 5 minutes via ETL process
