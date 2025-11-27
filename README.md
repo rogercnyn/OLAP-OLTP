@@ -133,12 +133,22 @@ cat scripts/etl-oltp-to-olap.sql | docker exec -i $reportsId psql -U postgres -d
 
 ### Run JMeter Load Tests
 ```bash
-docker run --rm --network myapp_olap_oltp_network \
-  -v ${PWD}/jmeter:/jmeter justb4/jmeter \
-  -n -t /jmeter/booking-load-test-docker.jmx \
-  -l /jmeter/results.jtl
+# 1. Deploy the test stack (runs the JMeter job once via docker-compose.yml)
+docker stack deploy -c docker-compose.yml myapp
 
-# Results: ~120 req/sec, 18ms avg, 0 double bookings ✅
+# 2. Check status, get the successful Task ID (e.g., t79qf0rystka), and confirm 'Shutdown Complete' state
+docker service ps myapp_jmeter-load-test
+
+# 3. Find the actual Container ID using the Task ID (e.g., t79qf0rystka)
+docker inspect --format='{{.Status.ContainerStatus.ContainerID}}' t79qf0rystka
+
+# 4. Copy the results file (.jtl) from the stopped container back to the host path
+# NOTE: Replace the Container ID (4d1a48eddb22) with the value from Step 3.
+docker cp 4d1a48eddb22:/jmeter/results.jtl "D:/Coding Files/STADVDB/MCO2/OLAP-OLTP/jmeter/results.jtl"
+
+# 5. Optional: Remove the container after successful file retrieval
+docker rm 4d1a48eddb22
+
 ```
 
 ## 🏗️ Architecture
