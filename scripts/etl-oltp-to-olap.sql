@@ -73,7 +73,7 @@ SELECT
         ELSE 'Night'
     END as time_of_day
 FROM dblink(
-    'dbname=movies_oltp host=olap_oltp_primary user=postgres password=password',
+    'dbname=movies_oltp host=myapp_postgres-primary user=postgres password=password',
     'SELECT 
         p.id as payment_id,
         p.customer_id,

@@ -1,27 +1,40 @@
 # 🎬 Movie Booking System - OLAP-OLTP Project
 
-## Quick Start
+## Quick Start (Docker Swarm)
 
 ### Prerequisites
 - Docker Desktop installed and running
+- Docker Swarm initialized
 - 8GB+ RAM available
 
-### Run Everything
+### Initialize Swarm (First Time Only)
 ```bash
-# Clone and navigate
+# Initialize Docker Swarm
+docker swarm init
+
+# Verify Swarm is active
+docker info | grep Swarm
+```
+
+### Deploy Everything
+```bash
+# Navigate to project directory
 cd /path/to/OLAP-OLTP
 
-# Start all services
-docker-compose up -d
+# Deploy the stack
+docker stack deploy -c docker-compose.yml myapp
 
 # Wait 2-3 minutes for initialization
-docker-compose ps  # Check all services are "healthy"
+docker stack ps myapp  # Check all services are running
+
+# Watch services come online
+docker stack services myapp
 ```
 
 ### Access the Application
-- **🎬 Movie Booking:** http://localhost
-- **📊 Analytics Dashboard:** http://localhost/analytics
-- **🗄️ Database Admin:** http://localhost:5050 (admin@admin.com / admin)
+- **🎬 Movie Booking:** http://72.61.112.223 (or http://localhost if running locally)
+- **📊 Analytics Dashboard:** http://72.61.112.223/analytics
+- **🗄️ Database Admin:** http://72.61.112.223:5050 (admin@admin.com / admin)
 
 ## 🎯 Try It Out
 
@@ -35,6 +48,7 @@ docker-compose ps  # Check all services are "healthy"
 1. Go to http://localhost/analytics
 2. See revenue trends, top movies, and peak booking hours
 3. Interactive charts with hover details
+4. **Note:** Analytics update every 5 minutes via ETL process
 
 ### 3. Test Race Conditions
 1. Open 2 browser windows
@@ -43,49 +57,116 @@ docker-compose ps  # Check all services are "healthy"
 
 ## 🔧 Useful Commands
 
+### Stack Management
 ```bash
-# View logs
-docker-compose logs -f
+# View all services
+docker stack services myapp
 
-# Restart everything
-docker-compose restart
+# View service logs (replace service name)
+docker service logs -f myapp_backend
+docker service logs -f myapp_postgres-primary
+docker service logs -f myapp_etl
 
-# Stop everything
-docker-compose down
+# View detailed service status
+docker stack ps myapp
 
-# Clean restart (removes data)
-docker-compose down -v && docker-compose up -d
+# Scale a service (example: scale backend to 3 instances)
+docker service scale myapp_backend=3
 
-# Access primary database
-docker exec -it olap_oltp_primary psql -U postgres -d movies_oltp
+# Update the stack (after changing docker-compose.yml)
+docker stack deploy -c docker-compose.yml myapp
+
+# Remove the entire stack
+docker stack rm myapp
+
+# Leave Swarm mode (warning: removes all stacks)
+docker swarm leave --force
+```
+
+### Database Access
+```bash
+# First, get the container name (they have dynamic names in Swarm)
+docker ps --filter "name=myapp_postgres-primary"
+
+# Access primary database (replace with actual container name)
+docker exec -it myapp_postgres-primary.1.xyz123abc psql -U postgres -d movies_oltp
+
+# Or use PowerShell to automate this
+$primaryId = docker ps -q -f "name=myapp_postgres-primary"
+docker exec -it $primaryId psql -U postgres -d movies_oltp
 
 # Access reports database
-docker exec -it olap_oltp_reports psql -U postgres -d movies_olap
+$reportsId = docker ps -q -f "name=myapp_postgres-reports"
+docker exec -it $reportsId psql -U postgres -d movies_olap
+```
+
+### Clean Restart (Removes All Data)
+```bash
+# Remove stack
+docker stack rm myapp
+
+# Wait for all containers to stop (verify with docker ps)
+docker ps
+
+# Remove all volumes (WARNING: deletes all data)
+docker volume rm myapp_primary_data myapp_backup_data myapp_reports_data myapp_pgadmin_data myapp_wal_archive_data
+
+# Redeploy
+docker stack deploy -c docker-compose.yml myapp
 ```
 
 ## 📈 Load Testing (Optional)
 
+### Generate Test Data
 ```bash
+# Get primary container ID
+$primaryId = docker ps -q -f "name=myapp_postgres-primary"
+
 # Generate realistic test data (5,000 bookings)
-cat scripts/generate-realistic-dataset.sql | docker exec -i olap_oltp_primary psql -U postgres -d movies_oltp
+cat scripts/generate-realistic-dataset.sql | docker exec -i $primaryId psql -U postgres -d movies_oltp
 
-# Sync to analytics database
-cat scripts/etl-oltp-to-olap.sql | docker exec -i olap_oltp_reports psql -U postgres -d movies_olap
+# ETL will automatically sync data to analytics within 5 minutes
+# Or manually trigger ETL:
+$reportsId = docker ps -q -f "name=myapp_postgres-reports"
+cat scripts/etl-oltp-to-olap.sql | docker exec -i $reportsId psql -U postgres -d movies_olap
+```
 
-# Run JMeter load tests
-docker run --rm --network olap_oltp_network \
-  -v $(pwd)/jmeter:/jmeter justb4/jmeter \
+### Run JMeter Load Tests
+```bash
+docker run --rm --network myapp_olap_oltp_network \
+  -v ${PWD}/jmeter:/jmeter justb4/jmeter \
   -n -t /jmeter/booking-load-test-docker.jmx \
   -l /jmeter/results.jtl
 
 # Results: ~120 req/sec, 18ms avg, 0 double bookings ✅
 ```
 
-##  Project Structure
+## 🏗️ Architecture
+
+### Service Overview
+- **postgres-primary** (OLTP): Primary transactional database for bookings
+- **postgres-backup**: Hot standby with streaming replication
+- **postgres-reports** (OLAP): Analytics database with optimized star schema
+- **backend**: Express.js API with dual database connections
+- **frontend**: React + Nginx serving booking and analytics UI
+- **pgadmin**: Database administration interface
+- **etl**: Automated data sync (OLTP → OLAP every 5 minutes)
+
+### Network Architecture
+All services communicate via overlay network: `myapp_olap_oltp_network`
+
+Service DNS names in Swarm:
+- `postgres-primary` (not `myapp_postgres-primary`)
+- `postgres-reports`
+- `backend`
+- `frontend`
+
+## 📁 Project Structure
 
 ```
 OLAP-OLTP/
-├── docker-compose.yml       # Container orchestration
+├── docker-compose.yml       # Swarm stack configuration
+├── ddl.sql                  # Database schema
 ├── backend/                 # Express API server
 │   ├── server.js
 │   ├── config/db.js         # Dual database pools
@@ -96,10 +177,13 @@ OLAP-OLTP/
 │   │   └── Analytics.jsx    # Dashboard with charts
 │   └── nginx.conf           # Reverse proxy config
 ├── scripts/
-│   ├── init-primary.sql     # OLTP schema
-│   ├── init-reports.sql     # OLAP schema
-│   ├── generate-realistic-dataset.sql
-│   └── etl-oltp-to-olap.sql
+│   ├── init-primary.sql     # OLTP initialization
+│   ├── init-reports.sql     # OLAP star schema
+│   ├── postgresql-primary.conf
+│   ├── postgresql-standby.conf
+│   ├── pg_hba.conf
+│   ├── etl-oltp-to-olap.sql # Data sync script
+│   └── generate-realistic-dataset.sql
 └── jmeter/                  # Load testing config
     └── booking-load-test-docker.jmx
 ```
@@ -108,52 +192,131 @@ OLAP-OLTP/
 
 ### Services Won't Start
 ```bash
-# Check Docker is running
-docker --version
+# Check Swarm is initialized
+docker info | grep Swarm
 
-# View detailed logs
-docker-compose logs
+# View detailed service status
+docker stack ps myapp --no-trunc
 
-# Clean restart
-docker-compose down -v && docker-compose up -d
+# Check individual service logs
+docker service logs myapp_postgres-primary
+docker service logs myapp_backend
+docker service logs myapp_etl
+
+# Verify all config files exist
+ls -la ddl.sql scripts/
+```
+
+### ETL Service Failing
+```bash
+# Check ETL logs
+docker service logs myapp_etl
+
+# Common issues:
+# - Config file missing: Verify ./scripts/etl-oltp-to-olap.sql exists
+# - Database not ready: Wait for postgres services to be healthy
+# - Syntax error: Check docker-compose.yml ETL command formatting
+```
+
+### Database Schema Not Created
+```bash
+# This happens if volumes already exist from previous deployment
+# Solution: Clean restart (see "Clean Restart" section above)
+
+# Verify configs are mounted
+$primaryId = docker ps -q -f "name=myapp_postgres-primary"
+docker exec $primaryId ls -la /docker-entrypoint-initdb.d/
+
+# Expected output:
+# 01-schema.sql
+# 02-replication.sql
 ```
 
 ### Can't Access Application
 ```bash
-# Check all services are healthy
-docker-compose ps
+# Check all services are running
+docker stack services myapp
 
-# Verify backend is responding
-curl http://localhost:3000/api/schedule
+# All should show 1/1 replicas
+
+# Check backend health
+curl http://localhost:3000/api/health
 
 # Check frontend
 curl http://localhost
+
+# If backend shows 0/1, check logs
+docker service logs myapp_backend
+```
+
+### Analytics Not Updating
+```bash
+# Check ETL service is running
+docker service logs myapp_etl
+
+# Should see "Running ETL process..." every 5 minutes
+
+# Manually verify data sync
+$reportsId = docker ps -q -f "name=myapp_postgres-reports"
+docker exec $reportsId psql -U postgres -d movies_olap -c "SELECT COUNT(*) FROM fact_bookings;"
+
+# If count is 0, manually run ETL
+cat scripts/etl-oltp-to-olap.sql | docker exec -i $reportsId psql -U postgres -d movies_olap
 ```
 
 ### Database Connection Issues
 ```bash
 # Test primary database
-docker exec -it olap_oltp_primary psql -U postgres -d movies_oltp -c "SELECT COUNT(*) FROM movies;"
+$primaryId = docker ps -q -f "name=myapp_postgres-primary"
+docker exec $primaryId psql -U postgres -d movies_oltp -c "SELECT COUNT(*) FROM movies;"
 
 # Test reports database
-docker exec -it olap_oltp_reports psql -U postgres -d movies_olap -c "SELECT COUNT(*) FROM fact_bookings;"
+$reportsId = docker ps -q -f "name=myapp_postgres-reports"
+docker exec $reportsId psql -U postgres -d movies_olap -c "SELECT COUNT(*) FROM fact_bookings;"
+
+# Check replication status
+docker exec $primaryId psql -U postgres -c "SELECT * FROM pg_stat_replication;"
 ```
+
+## 🔄 Differences from Docker Compose
+
+If you're familiar with the `docker-compose up` version:
+
+| Feature | Docker Compose | Docker Swarm (This Version) |
+|---------|---------------|---------------------------|
+| Command | `docker-compose up -d` | `docker stack deploy -c docker-compose.yml myapp` |
+| Container names | Fixed (e.g., `olap_oltp_primary`) | Dynamic (e.g., `myapp_postgres-primary.1.xyz`) |
+| Config files | Bind mounts (e.g., `./ddl.sql:/path`) | Docker configs (read-only) |
+| Scaling | Manual | Built-in orchestration |
+| Service discovery | Container names | Service names (no stack prefix) |
+| Networking | Bridge network | Overlay network |
 
 ## 📝 Development
 
+For local development without Swarm, use the standard docker-compose.yml with bind mounts:
+
 ```bash
-# Frontend development (without Docker)
+# Frontend development
 cd frontend
 npm install
 npm run dev  # Runs on http://localhost:5173
 
-# Backend development (without Docker)
+# Backend development
 cd backend
 npm install
 node server.js  # Runs on http://localhost:3000
 ```
 
-<img width="1240" height="597" alt="image" src="https://github.com/user-attachments/assets/3393fe2c-d298-4916-9328-b24d436e21a7" />
-<img width="391" height="810" alt="image" src="https://github.com/user-attachments/assets/b23fed8a-2f55-4203-a381-47a43ca89bed" />
+## 🚀 Production Considerations
 
+- **Secrets Management**: Replace hardcoded passwords with Docker secrets
+- **Volume Backups**: Implement automated backup strategy for named volumes
+- **Monitoring**: Add Prometheus/Grafana for service monitoring
+- **Load Balancing**: Scale services with `docker service scale`
+- **Multi-node**: Deploy across multiple Swarm nodes for HA
 
+---
+
+<img width="1240" alt="Movie Booking Interface" src="https://github.com/user-attachments/assets/3393fe2c-d298-4916-9328-b24d436e21a7" />
+
+<img width="391" alt="Analytics Dashboard" src="https://github.com/user-attachments/assets/b23fed8a-2f55-4203-a381-47a43ca89bed" />

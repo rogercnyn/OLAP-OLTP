@@ -1,5 +1,21 @@
 version: '3.8'
 
+configs:
+  primary_ddl:
+    file: ./ddl.sql
+  primary_init:
+    file: ./scripts/init-primary.sql
+  primary_conf:
+    file: ./scripts/postgresql-primary.conf
+  primary_hba:
+    file: ./scripts/pg_hba.conf
+  standby_conf:
+    file: ./scripts/postgresql-standby.conf
+  reports_init:
+    file: ./scripts/init-reports.sql
+  etl_script:
+    file: ./scripts/etl-oltp-to-olap.sql
+
 services:
   # Primary Database (OLTP)
   postgres-primary:
@@ -10,13 +26,21 @@ services:
       POSTGRES_PASSWORD: password
       POSTGRES_DB: movies_oltp
       POSTGRES_INITDB_ARGS: "-c wal_level=replica -c max_wal_senders=3 -c max_replication_slots=3"
+    
     volumes:
       - primary_data:/var/lib/postgresql/data
-      - ./ddl.sql:/docker-entrypoint-initdb.d/01-schema.sql
-      - ./scripts/init-primary.sql:/docker-entrypoint-initdb.d/02-replication.sql
-      - ./scripts/postgresql-primary.conf:/etc/postgresql/postgresql.conf
-      - ./scripts/pg_hba.conf:/etc/postgresql/pg_hba.conf
-      - ./backups/wal_archive:/var/lib/postgresql/wal_archive
+      - wal_archive_data:/var/lib/postgresql/wal_archive
+    
+    configs:
+      - source: primary_ddl
+        target: /docker-entrypoint-initdb.d/01-schema.sql
+      - source: primary_init
+        target: /docker-entrypoint-initdb.d/02-replication.sql
+      - source: primary_conf
+        target: /etc/postgresql/postgresql.conf
+      - source: primary_hba
+        target: /etc/postgresql/pg_hba.conf
+
     ports:
       - "5432:5432"
     networks:
@@ -36,16 +60,22 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password
       PGDATA: /var/lib/postgresql/data/pgdata
+    
     volumes:
       - backup_data:/var/lib/postgresql/data
-      - ./scripts/postgresql-standby.conf:/etc/postgresql/postgresql.conf
+    
+    configs:
+      - source: standby_conf
+        target: /etc/postgresql/postgresql.conf
+
     ports:
       - "5433:5432"
     networks:
       - olap_oltp_network
+    
     depends_on:
-      postgres-primary:
-        condition: service_healthy
+      - postgres-primary
+      
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres || exit 0"]
       interval: 10s
@@ -57,7 +87,6 @@ services:
         echo 'Setting up standby server...'
         rm -rf /var/lib/postgresql/data/pgdata/*
         until PGPASSWORD=replicator pg_basebackup -h postgres-primary -U replicator -D /var/lib/postgresql/data/pgdata -Fp -Xs -P -R; do
-          echo 'Waiting for primary...'
           sleep 5
         done
         chown -R postgres:postgres /var/lib/postgresql/data/pgdata
@@ -74,16 +103,22 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password
       POSTGRES_DB: movies_olap
+      
     volumes:
       - reports_data:/var/lib/postgresql/data
-      - ./scripts/init-reports.sql:/docker-entrypoint-initdb.d/01-init-reports.sql
+      
+    configs:
+      - source: reports_init
+        target: /docker-entrypoint-initdb.d/01-init-reports.sql
+        
     ports:
       - "5434:5432"
     networks:
       - olap_oltp_network
+    
     depends_on:
-      postgres-primary:
-        condition: service_healthy
+      - postgres-primary
+      
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
@@ -92,9 +127,7 @@ services:
 
   # Backend API
   backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: gabarc0/olap-oltp-backend:latest
     container_name: olap_oltp_backend
     environment:
       NODE_ENV: production
@@ -111,23 +144,20 @@ services:
       - "3000:3000"
     networks:
       - olap_oltp_network
+      
     depends_on:
-      postgres-primary:
-        condition: service_healthy
-      postgres-reports:
-        condition: service_healthy
+      - postgres-primary
+      - postgres-reports
+      
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-    restart: unless-stopped
 
   # Frontend
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
+    image: gabarc0/olap-oltp-frontend:latest
     container_name: olap_oltp_frontend
     ports:
       - "80:80"
@@ -136,11 +166,10 @@ services:
     depends_on:
       - backend
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:80"]
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:80"]
       interval: 30s
       timeout: 10s
       retries: 3
-    restart: unless-stopped
 
   # PgAdmin
   pgadmin:
@@ -158,15 +187,33 @@ services:
       - postgres-primary
     volumes:
       - pgadmin_data:/var/lib/pgadmin
-    restart: unless-stopped
+
+  # ETL Service - Fixed to use configs instead of bind mount
+  etl:
+    image: postgres:16-alpine
+    depends_on:
+      - postgres-primary
+      - postgres-reports
+    networks:
+      - olap_oltp_network
+    configs:
+      - source: etl_script
+        target: /scripts/etl-oltp-to-olap.sql
+    command: >
+      sh -c "while true; do
+        echo 'Running ETL process...';
+        psql 'host=postgres-reports user=postgres password=password dbname=movies_olap' < /scripts/etl-oltp-to-olap.sql;
+        echo 'ETL completed. Sleeping for 300 seconds...';
+        sleep 300;
+      done"
 
 volumes:
   primary_data:
   backup_data:
   reports_data:
   pgadmin_data:
+  wal_archive_data: 
 
 networks:
   olap_oltp_network:
-    driver: bridge
-
+    driver: overlay

@@ -54,7 +54,7 @@ function App() {
 
   // --- API CALLS ---
   useEffect(() => {
-    fetch(`http://localhost:3000/api/schedule?date=${selectedDate}`)
+    fetch(`/api/schedule?date=${selectedDate}`)
       .then(res => res.json())
       .then(data => setMovies(data))
       .catch(err => console.error("Error fetching movies:", err));
@@ -67,7 +67,7 @@ function App() {
     setBookingStep('SEATS'); // Reset flow
     setPaymentDetails({ cardNumber: '', expiry: '', cvv: '', name: '' }); // Clear form
     
-    fetch(`http://localhost:3000/api/showtimes/${showtimeId}/seats`)
+    fetch(`/api/showtimes/${showtimeId}/seats`)
       .then(res => res.json())
       .then(data => {
         setSeats(data);
@@ -113,7 +113,7 @@ function App() {
   const submitBooking = async () => {
     setBookingStatus('Processing Payment...');
     try {
-      const res = await fetch('http://localhost:3000/api/book', {
+      const res = await fetch('/api/book', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -134,7 +134,7 @@ function App() {
         setTimeout(() => setShowModal(false), 1500);
       } else if (res.status === 409) {
         setBookingStatus('Error: Seats were just taken!');
-        const refreshRes = await fetch(`http://localhost:3000/api/showtimes/${selectedShowtime.id}/seats`);
+        const refreshRes = await fetch(`/api/showtimes/${selectedShowtime.id}/seats`);
         const refreshData = await refreshRes.json();
         setSeats(refreshData);
         setSelectedSeats([]);
