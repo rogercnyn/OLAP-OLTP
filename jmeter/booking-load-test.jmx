@@ -12,6 +12,11 @@
             <stringProp name="Argument.value">http://localhost:3000</stringProp>
             <stringProp name="Argument.metadata">=</stringProp>
           </elementProp>
+          <elementProp name="SCHEDULE_DATE" elementType="Argument">
+            <stringProp name="Argument.name">SCHEDULE_DATE</stringProp>
+            <stringProp name="Argument.value">2025-11-18</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
         </collectionProp>
       </elementProp>
     </TestPlan>
@@ -41,8 +46,8 @@
           <boolProp name="LoopController.continue_forever">false</boolProp>
           <stringProp name="LoopController.loops">5</stringProp>
         </elementProp>
-        <stringProp name="ThreadGroup.num_threads">100</stringProp>
-        <stringProp name="ThreadGroup.ramp_time">10</stringProp>
+        <stringProp name="ThreadGroup.num_threads">50</stringProp>
+        <stringProp name="ThreadGroup.ramp_time">20</stringProp>
         <longProp name="ThreadGroup.start_time">1371789708000</longProp>
         <longProp name="ThreadGroup.end_time">1371789708000</longProp>
         <boolProp name="ThreadGroup.scheduler">false</boolProp>
@@ -59,7 +64,7 @@
           <stringProp name="HTTPSampler.port">3000</stringProp>
           <stringProp name="HTTPSampler.protocol">http</stringProp>
           <stringProp name="HTTPSampler.contentEncoding"></stringProp>
-          <stringProp name="HTTPSampler.path">/api/schedule</stringProp>
+          <stringProp name="HTTPSampler.path">/api/schedule?date=${SCHEDULE_DATE}</stringProp>
           <stringProp name="HTTPSampler.method">GET</stringProp>
           <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
           <boolProp name="HTTPSampler.auto_redirects">false</boolProp>
@@ -73,7 +78,13 @@
           <!-- Extract showtime_id -->
           <JSONPostProcessor guiclass="JSONPostProcessorGui" testclass="JSONPostProcessor" testname="Extract Showtime ID" enabled="true">
             <stringProp name="JSONPostProcessor.referenceNames">showtime_id</stringProp>
-            <stringProp name="JSONPostProcessor.jsonPathExprs">$[0].showtimes[0].showtime_id</stringProp>
+            <stringProp name="JSONPostProcessor.jsonPathExprs">$[0].showtimes[0].id</stringProp>
+            <stringProp name="JSONPostProcessor.match_numbers">1</stringProp>
+          </JSONPostProcessor>
+          <hashTree/>
+          <JSONPostProcessor guiclass="JSONPostProcessorGui" testclass="JSONPostProcessor" testname="Extract Movie Price" enabled="true">
+            <stringProp name="JSONPostProcessor.referenceNames">movie_price</stringProp>
+            <stringProp name="JSONPostProcessor.jsonPathExprs">$[0].price</stringProp>
             <stringProp name="JSONPostProcessor.match_numbers">1</stringProp>
           </JSONPostProcessor>
           <hashTree/>
@@ -88,7 +99,7 @@
           <stringProp name="HTTPSampler.port">3000</stringProp>
           <stringProp name="HTTPSampler.protocol">http</stringProp>
           <stringProp name="HTTPSampler.contentEncoding"></stringProp>
-          <stringProp name="HTTPSampler.path">/api/seats/${showtime_id}</stringProp>
+          <stringProp name="HTTPSampler.path">/api/showtimes/${showtime_id}/seats</stringProp>
           <stringProp name="HTTPSampler.method">GET</stringProp>
           <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
           <boolProp name="HTTPSampler.auto_redirects">false</boolProp>
@@ -99,7 +110,7 @@
           <!-- Extract seat_id -->
           <JSONPostProcessor guiclass="JSONPostProcessorGui" testclass="JSONPostProcessor" testname="Extract Seat ID" enabled="true">
             <stringProp name="JSONPostProcessor.referenceNames">seat_id</stringProp>
-            <stringProp name="JSONPostProcessor.jsonPathExprs">$[?(@.is_taken==false)].seat_id</stringProp>
+            <stringProp name="JSONPostProcessor.jsonPathExprs">$[?(@.status=='available')].id</stringProp>
             <stringProp name="JSONPostProcessor.match_numbers">1</stringProp>
           </JSONPostProcessor>
           <hashTree/>
@@ -113,10 +124,17 @@
               <elementProp name="" elementType="HTTPArgument">
                 <boolProp name="HTTPArgument.always_encode">false</boolProp>
                 <stringProp name="Argument.value">{&#xd;
-  "showtime_id": ${showtime_id},&#xd;
-  "seat_ids": [${seat_id}],&#xd;
-  "customer_name": "Load Test User ${__threadNum}",&#xd;
-  "customer_email": "test${__threadNum}@loadtest.com"&#xd;
+  "showtimeId": ${showtime_id},&#xd;
+  "seats": [&#xd;
+    {&#xd;
+      "id": ${seat_id},&#xd;
+      "price": ${movie_price}&#xd;
+    }&#xd;
+  ],&#xd;
+  "customerName": "Load Test User ${__threadNum}",&#xd;
+  "customerEmail": "test${__threadNum}@loadtest.com",&#xd;
+  "paymentMethod": "credit_card",&#xd;
+  "paymentAmount": ${movie_price}&#xd;
 }</stringProp>
                 <stringProp name="Argument.metadata">=</stringProp>
               </elementProp>
