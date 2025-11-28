@@ -27,20 +27,49 @@ const CHART_COLORS = [
   APPLE_COLORS.pink
 ];
 
+// --- Formatting helpers ---
+const formatShortDate = (value) => {
+  if (!value) return '';
+  return new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+};
+
+const formatLongDate = (value) => {
+  if (!value) return '';
+  return new Date(value).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+};
+
+const formatAxisCurrency = (value) => {
+  if (value >= 1000000) return `₱${(value / 1000000).toFixed(1)}M`;
+  if (value >= 1000) return `₱${Math.round(value / 1000)}k`;
+  return `₱${value}`;
+};
+
+const formatTooltipCurrency = (value) => {
+  const numeric = isNaN(parseFloat(value)) ? 0 : parseFloat(value);
+  return `₱${numeric.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
+};
+
 function Analytics() {
   const [summary, setSummary] = useState(null);
   const [revenueData, setRevenueData] = useState([]);
   const [movieData, setMovieData] = useState([]);
   const [timeslotData, setTimeslotData] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     fetchAnalytics();
   }, []);
 
-  const fetchAnalytics = async () => {
+  const fetchAnalytics = async (isRefresh = false) => {
     try {
-      setLoading(true);
+      if (isRefresh) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+      }
+      setError(null);
       
       const [summaryRes, revenueRes, movieRes, timeslotRes] = await Promise.all([
         fetch(`${API_URL}/api/analytics/summary`),
@@ -49,11 +78,28 @@ function Analytics() {
         fetch(`${API_URL}/api/analytics/timeslots`)
       ]);
 
-      setSummary(await summaryRes.json());
-      setRevenueData(await revenueRes.json());
+      if (!summaryRes.ok || !revenueRes.ok || !movieRes.ok || !timeslotRes.ok) {
+        throw new Error('One or more analytics endpoints returned an error');
+      }
+
+      const summaryData = await summaryRes.json();
+      const revenueRaw = await revenueRes.json();
+      const movies = await movieRes.json();
+      const timeslots = await timeslotRes.json();
+
+      setSummary(summaryData);
+
+      // Normalize revenue data and sort ascending by date
+      setRevenueData(
+        (revenueRaw || [])
+          .map(item => ({
+            ...item,
+            daily_revenue: isNaN(parseFloat(item.daily_revenue)) ? 0 : parseFloat(item.daily_revenue)
+          }))
+          .sort((a, b) => new Date(a.booking_date) - new Date(b.booking_date))
+      );
       
       // Parse movie data to ensure numbers
-      const movies = await movieRes.json();
       setMovieData(movies.map(m => ({
         ...m,
         total_revenue: parseFloat(m.total_revenue),
@@ -62,11 +108,16 @@ function Analytics() {
         avg_revenue_per_booking: parseFloat(m.avg_revenue_per_booking)
       })));
       
-      setTimeslotData(await timeslotRes.json());
+      setTimeslotData(timeslots || []);
     } catch (err) {
       console.error('Failed to fetch analytics:', err);
+      setError('Failed to load analytics. Please refresh to try again.');
     } finally {
-      setLoading(false);
+      if (isRefresh) {
+        setRefreshing(false);
+      } else {
+        setLoading(false);
+      }
     }
   };
 
@@ -124,67 +175,101 @@ function Analytics() {
 
       {/* Revenue Trend - Area Chart */}
       <div className="chart-section">
-        <h2>Revenue Trend</h2>
-        <p className="chart-subtitle">Daily revenue over the last 30 days</p>
-        <ResponsiveContainer width="100%" height={380}>
-          <AreaChart 
-            data={revenueData}
-            margin={{ top: 10, right: 30, left: 20, bottom: 5 }}
+        <div className="chart-header">
+          <div>
+            <h2>Revenue Trend</h2>
+            <p className="chart-subtitle">Daily revenue over the last 30 days</p>
+          </div>
+          <button 
+            className="refresh-btn" 
+            onClick={() => fetchAnalytics(true)} 
+            disabled={refreshing}
           >
-            <defs>
-              <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor={APPLE_COLORS.blue} stopOpacity={0.4}/>
-                <stop offset="95%" stopColor={APPLE_COLORS.blue} stopOpacity={0.05}/>
-              </linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
-            <XAxis 
-              dataKey="booking_date" 
-              tickFormatter={(date) => new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-              stroke="#a1a1a1"
-              style={{ fontSize: '0.85em' }}
-              tickLine={false}
-            />
-            <YAxis 
-              stroke="#a1a1a1"
-              style={{ fontSize: '0.85em' }}
-              tickLine={false}
-              axisLine={false}
-              tickFormatter={(value) => {
-                if (value >= 1000000) {
-                  return `₱${(value / 1000000).toFixed(1)}M`;
-                }
-                if (value >= 1000) {
-                  return `₱${Math.round(value / 1000)}k`;
-                }
-                return `₱${value}`;
-              }}
-              width={75}
-            />
-            <Tooltip 
-              contentStyle={{
-                backgroundColor: 'rgba(26, 26, 26, 0.95)',
-                backdropFilter: 'blur(20px)',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
-                borderRadius: '12px',
-                boxShadow: '0 8px 32px rgba(0, 0, 0, 0.6)',
-                padding: '12px 16px',
-                color: '#ffffff'
-              }}
-              labelFormatter={(date) => new Date(date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
-              formatter={(value) => [`₱${parseFloat(value).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`, 'Revenue']}
-            />
-            <Area 
-              type="monotone" 
-              dataKey="daily_revenue" 
-              stroke={APPLE_COLORS.blue}
-              strokeWidth={3}
-              fill="url(#colorRevenue)"
-              dot={{ fill: APPLE_COLORS.blue, strokeWidth: 2, r: 4 }}
-              activeDot={{ r: 7, strokeWidth: 0, fill: APPLE_COLORS.blue }}
-            />
-          </AreaChart>
-        </ResponsiveContainer>
+            {refreshing ? 'Refreshing…' : 'Refresh data'}
+          </button>
+        </div>
+
+        {error ? (
+          <div className="analytics-empty">
+            {error}
+            <button 
+              className="refresh-btn inline"
+              onClick={() => fetchAnalytics(true)}
+              disabled={refreshing}
+            >
+              Retry
+            </button>
+          </div>
+        ) : (!revenueData || revenueData.length === 0) ? (
+          <div className="analytics-empty">
+            No revenue data available for the selected period.
+            <button 
+              className="refresh-btn inline"
+              onClick={() => fetchAnalytics(true)}
+              disabled={refreshing}
+            >
+              Reload
+            </button>
+          </div>
+        ) : (
+          <ResponsiveContainer width="100%" height={380}>
+            <AreaChart 
+              data={revenueData}
+              margin={{ top: 10, right: 30, left: 20, bottom: 5 }}
+            >
+              <defs>
+                <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor={APPLE_COLORS.blue} stopOpacity={0.4}/>
+                  <stop offset="95%" stopColor={APPLE_COLORS.blue} stopOpacity={0.05}/>
+                </linearGradient>
+              </defs>
+
+              <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
+
+              <XAxis 
+                dataKey="booking_date"
+                tickFormatter={formatShortDate}
+                stroke="#a1a1a1"
+                tickLine={false}
+                axisLine={false}
+                tick={{ fontSize: 12 }}
+              />
+
+              <YAxis 
+                stroke="#a1a1a1"
+                tickLine={false}
+                axisLine={false}
+                tickFormatter={formatAxisCurrency}
+                width={75}
+                tick={{ fontSize: 12 }}
+              />
+
+              <Tooltip 
+                contentStyle={{
+                  backgroundColor: 'rgba(26, 26, 26, 0.95)',
+                  backdropFilter: 'blur(20px)',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  borderRadius: '12px',
+                  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.6)',
+                  padding: '12px 16px',
+                  color: '#ffffff'
+                }}
+                labelFormatter={formatLongDate}
+                formatter={(value) => [formatTooltipCurrency(value), 'Revenue']}
+              />
+
+              <Area 
+                type="monotone" 
+                dataKey="daily_revenue" 
+                stroke={APPLE_COLORS.blue}
+                strokeWidth={3}
+                fill="url(#colorRevenue)"
+                dot={{ fill: APPLE_COLORS.blue, strokeWidth: 2, r: 4 }}
+                activeDot={{ r: 7, strokeWidth: 0, fill: APPLE_COLORS.blue }}
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        )}
       </div>
 
       {/* Movie Performance Chart - Horizontal Bars */}

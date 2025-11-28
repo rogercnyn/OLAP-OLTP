@@ -127,7 +127,9 @@ services:
 
   # Backend API
   backend:
-    image: gabarc0/olap-oltp-backend:latest
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
     container_name: olap_oltp_backend
     environment:
       NODE_ENV: production
@@ -157,7 +159,9 @@ services:
 
   # Frontend
   frontend:
-    image: gabarc0/olap-oltp-frontend:latest
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
     container_name: olap_oltp_frontend
     ports:
       - "80:80"
@@ -216,4 +220,4 @@ volumes:
 
 networks:
   olap_oltp_network:
-    driver: overlay
+    driver: bridge

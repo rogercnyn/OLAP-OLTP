@@ -69,21 +69,38 @@ app.get('/api/schedule', async (req, res) => {
     const { date } = req.query; 
     try {
         const query = `
-            SELECT 
-                m.id, 
-                m.title, 
+            WITH showtime_slots AS (
+                SELECT
+                    s.movie_id,
+                    MIN(s.id) AS id,
+                    TO_CHAR(s.start_time, 'HH24:MI') AS time_label,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY s.movie_id, DATE(s.start_time)
+                        ORDER BY MIN(s.start_time)
+                    ) AS time_rank
+                FROM showtimes s
+                WHERE DATE(s.start_time) = $1
+                GROUP BY s.movie_id, DATE(s.start_time), TO_CHAR(s.start_time, 'HH24:MI')
+            )
+            SELECT
+                m.id,
+                m.title,
                 m.price,
-                json_agg(
-                    json_build_object(
-                        'id', s.id,
-                        'time', TO_CHAR(s.start_time, 'HH24:MI')
-                    ) ORDER BY s.start_time
-                ) as showtimes
+                COALESCE(
+                    json_agg(
+                        json_build_object(
+                            'id', slots.id,
+                            'time', slots.time_label
+                        )
+                        ORDER BY slots.time_label
+                    ) FILTER (WHERE slots.id IS NOT NULL),
+                    '[]'::json
+                ) AS showtimes
             FROM movies m
-            JOIN showtimes s ON s.movie_id = m.id
-            WHERE DATE(s.start_time) = $1
+            LEFT JOIN showtime_slots slots
+                ON slots.movie_id = m.id AND slots.time_rank <= 3
             GROUP BY m.id, m.title, m.price
-            ORDER BY m.title
+            ORDER BY m.title;
         `;
         const result = await pool.query(query, [date]);
         res.json(result.rows);
